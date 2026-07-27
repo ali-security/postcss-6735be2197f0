@@ -1,17 +1,16 @@
-name: Test
+name: Seal Cross-Platform Test
 on:
   push:
-    branches:
-      - main
-  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
   full:
-    if: false
     name: Node.js Latest Full
     runs-on: ubuntu-latest
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2024-03-20T22%3A55%3A34.179000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
@@ -22,22 +21,26 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 21
-          cache: pnpm
       - name: Install dependencies
         run: pnpm install --ignore-scripts
       - name: Run tests
         run: pnpm test
   short:
-    if: false
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
         node-version:
           - 20
           - 18
           - 16
-    name: Node.js ${{ matrix.node-version }} Quick
+    name: Node.js ${{ matrix.node-version }} Quick on ${{ matrix.os }}
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2024-03-20T22%3A55%3A34.179000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
@@ -48,15 +51,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: pnpm
       - name: Install dependencies
         run: pnpm install --ignore-scripts
       - name: Run unit tests
         run: pnpm run unit
   old:
-    if: false
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node-version:
           - 14
@@ -64,29 +66,34 @@ jobs:
           - 10
     name: Node.js ${{ matrix.node-version }} Quick
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2024-03-20T22%3A55%3A34.179000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
-        uses: pnpm/action-setup@v1
+        uses: pnpm/action-setup@v3
         with:
-          version: 3
-        env:
-          ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-      - name: Install Node.js ${{ matrix.node-version }}
+          version: 8
+      - name: Install Node.js LTS to resolve dependencies
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 20
       - name: Install dependencies
         run: pnpm install --ignore-scripts
       - name: Downgrade TypeScript
         run: pnpm install typescript@4
+      - name: Install Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
       - name: Run unit tests
-        run: pnpm run old
+        run: node node_modules/uvu/bin.js -r $PWD/test/old-node.js -r $PWD/node_modules/ts-node/register/transpile-only test "\.test\.(ts|js)$"
   windows:
-    if: false
     runs-on: windows-latest
     name: Windows Quick
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2024-03-20T22%3A55%3A34.179000Z@time-machines-npm.sealsecurity.io/
       - name: Checkout the repository
         uses: actions/checkout@v4
       - name: Install pnpm
@@ -97,7 +104,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
       - name: Install dependencies
         run: pnpm install --ignore-scripts
       - name: Run unit tests

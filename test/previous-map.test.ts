@@ -13,7 +13,8 @@ import { pathToFileURL } from 'url'
 import { test } from 'uvu'
 import { equal, is, match, not, throws, type } from 'uvu/assert'
 
-import { parse } from '../lib/postcss.js'
+import { Document, parse, ProcessOptions, Root } from '../lib/postcss.js'
+import PreviousMap from '../lib/previous-map.js'
 
 let dir = join(__dirname, 'prevmap-fixtures')
 let mapObj = {
@@ -37,6 +38,21 @@ function deleteDir(path: string): void {
     })
     rmdirSync(path)
   }
+}
+
+function catchParse(
+  css: string,
+  opts?: Pick<ProcessOptions, 'from' | 'map'>
+): { error: string; root?: Document | Root } {
+  try {
+    return { error: '', root: parse(css, opts) }
+  } catch (e) {
+    return { error: (e as Error).message }
+  }
+}
+
+function toAnnotation(path: string): string {
+  return path.split('\\').join('/')
 }
 
 test.after.each(() => {
@@ -360,6 +376,85 @@ test('works with index map', () => {
     }
   })
   is((root as any).source.input.origin(1, 1).file, join(__dirname, 'b.css'))
+})
+
+test('does not read non-map file by absolute annotation path', () => {
+  mkdirSync(dir)
+  let secret = join(dir, 'secret.txt')
+  writeFileSync(secret, 'SECRET_TOKEN=42\nnot a source map\n')
+
+  // Untrusted CSS pointing to an arbitrary file on the disk
+  let { error, root } = catchParse(
+    `a{}\n/*# sourceMappingURL=${toAnnotation(secret)} */`
+  )
+
+  is(error, '')
+  type(root?.source?.input.map, 'undefined')
+})
+
+test('does not read non-map file by directory traversal', () => {
+  mkdirSync(dir)
+  mkdirSync(join(dir, 'sub'))
+  writeFileSync(join(dir, 'secret.txt'), 'SECRET_TOKEN=42\nnot a source map\n')
+
+  let { error, root } = catchParse(
+    'a{}\n/*# sourceMappingURL=../secret.txt */',
+    { from: join(dir, 'sub', 'a.css') }
+  )
+
+  is(error, '')
+  type(root?.source?.input.map, 'undefined')
+})
+
+test('does not report existence of non-map files', () => {
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'secret.txt'), 'SECRET_TOKEN=42\nnot a source map\n')
+  let from = join(dir, 'a.css')
+
+  let existing = catchParse('a{}\n/*# sourceMappingURL=secret.txt */', { from })
+  let missing = catchParse('a{}\n/*# sourceMappingURL=absent.txt */', { from })
+
+  is(existing.error, '')
+  is(missing.error, '')
+  type(existing.root?.source?.input.map, 'undefined')
+  type(missing.root?.source?.input.map, 'undefined')
+})
+
+test('ignores map file with broken JSON', () => {
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'a.map'), 'SECRET_TOKEN=42\nnot a source map\n')
+
+  let { error, root } = catchParse('a{}\n/*# sourceMappingURL=a.map */', {
+    from: join(dir, 'a.css')
+  })
+
+  is(error, '')
+  type(root?.source?.input.map, 'undefined')
+})
+
+test('reads non-map file only with unsafeMap option', () => {
+  mkdirSync(dir)
+  writeFileSync(join(dir, 'a.txt'), map)
+  let css = 'a{}\n/*# sourceMappingURL=a.txt */'
+  let from = join(dir, 'a.css')
+
+  type(new PreviousMap(css, { from }).text, 'undefined')
+
+  let unsafe = new PreviousMap(css, { from, unsafeMap: true })
+  is(unsafe.text, map)
+  is(unsafe.root, dir)
+})
+
+test('accepts a function returning non-map file', () => {
+  let file = join(dir, 'previous-sourcemap-function.txt')
+  mkdirSync(dir)
+  writeFileSync(file, map)
+
+  let root = parse('body{}\n/*# sourceMappingURL=a.map */', {
+    map: { prev: () => file }
+  })
+
+  is(root.source?.input.map.text, map)
 })
 
 test.run()
